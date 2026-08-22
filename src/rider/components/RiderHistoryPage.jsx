@@ -41,32 +41,40 @@ export default function RiderHistoryPage() {
 
       {/* HISTORY CARDS LIST */}
       <div className="space-y-3">
-        {history.map(item => (
-          <div key={item.id} className="bg-white rounded-3xl border border-stone-200 p-5 space-y-3 shadow-xs">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="font-display font-black text-base text-stone-900">ORDER #{item.id}</span>
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md uppercase">
-                  ✓ DELIVERED
-                </span>
+        {Array.isArray(history) && history.length > 0 ? (
+          history.map(item => (
+            <div key={item.id} className="bg-white rounded-3xl border border-stone-200 p-5 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-display font-black text-base text-stone-900">ORDER #{item.id}</span>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md uppercase">
+                    ✓ DELIVERED
+                  </span>
+                </div>
+
+                <span className="text-xs text-stone-400 font-semibold">{item.completedAt || 'Recently'}</span>
               </div>
 
-              <span className="text-xs text-stone-400 font-semibold">{item.completedAt}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-semibold">
+                <div>
+                  <p className="text-stone-900 font-extrabold">{item.storeName || 'Grocery Store'} ➔ {item.customerName || 'Customer'}</p>
+                  <p className="text-stone-400 font-normal text-[11px]">{item.deliveryAddress || 'Delivery Address'}</p>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="font-black text-base text-emerald-950 block">+₹{item.earnings || 65}</span>
+                  <span className="text-[10px] text-stone-400 font-bold">{item.distance || '2.5 km'} • {item.paymentType || 'Online'}</span>
+                </div>
+              </div>
             </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-semibold">
-              <div>
-                <p className="text-stone-900 font-extrabold">{item.storeName} ➔ {item.customerName}</p>
-                <p className="text-stone-400 font-normal text-[11px]">{item.deliveryAddress}</p>
-              </div>
-
-              <div className="text-right shrink-0">
-                <span className="font-black text-base text-emerald-950 block">+₹{item.earnings}</span>
-                <span className="text-[10px] text-stone-400 font-bold">{item.distance} • {item.paymentType}</span>
-              </div>
-            </div>
+          ))
+        ) : (
+          <div className="py-12 text-center bg-white rounded-3xl border border-stone-200 p-6 space-y-2">
+            <History className="w-10 h-10 text-stone-300 mx-auto" />
+            <h4 className="font-display font-black text-base text-stone-800">No Delivery History Yet</h4>
+            <p className="text-xs text-stone-500">Your completed delivery orders will appear here.</p>
           </div>
-        ))}
+        )}
       </div>
 
     </div>

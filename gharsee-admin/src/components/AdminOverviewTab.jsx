@@ -291,13 +291,13 @@ export default function AdminOverviewTab() {
                       <span>Info</span>
                     </button>
                     <button
-                      onClick={() => approveRider(rider.id, rider.fullName)}
+                      onClick={() => approveRider(rider.id, rider.fullName, rider)}
                       className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                     >
                       Verify
                     </button>
                     <button
-                      onClick={() => rejectRider(rider.id, rider.fullName)}
+                      onClick={() => rejectRider(rider.id, rider.fullName, rider)}
                       className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                     >
                       Reject
@@ -455,7 +455,7 @@ export default function AdminOverviewTab() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={async () => {
-                    await rejectRider(selectedRider.id, selectedRider.fullName);
+                    await rejectRider(selectedRider.id, selectedRider.fullName, selectedRider);
                     setSelectedRider(null);
                   }}
                   className="py-2.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5"
@@ -466,7 +466,7 @@ export default function AdminOverviewTab() {
 
                 <button
                   onClick={async () => {
-                    await approveRider(selectedRider.id, selectedRider.fullName);
+                    await approveRider(selectedRider.id, selectedRider.fullName, selectedRider);
                     setSelectedRider(null);
                   }}
                   className="py-2.5 px-5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5"

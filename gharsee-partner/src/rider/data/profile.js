@@ -15,6 +15,6 @@ export const INITIAL_RIDER_PROFILE = {
   isPending: true,
   isApproved: false,
   is_approved: false,
-  status: 'pending_approval',
+  status: 'pending',
   isOnline: false
 };

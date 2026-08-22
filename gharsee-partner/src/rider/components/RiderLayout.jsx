@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Component } from 'react';
 import { useRider } from '../context/RiderContext';
 import RiderLogin from './RiderLogin';
 import RiderHeader from './RiderHeader';
@@ -13,9 +13,56 @@ import RiderSettingsPage from './RiderSettingsPage';
 import RiderToastContainer from './RiderToastContainer';
 import RiderIncomingRequestModal from './RiderIncomingRequestModal';
 import RiderPendingApprovalView from './RiderPendingApprovalView';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 
-export default function RiderLayout() {
+class RiderErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Rider App Layout Crash Caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#FBF9F5] flex flex-col items-center justify-center p-6 text-center space-y-4 font-sans">
+          <div className="w-16 h-16 rounded-3xl bg-rose-100 text-rose-700 flex items-center justify-center mx-auto shadow-inner">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="font-display font-extrabold text-2xl text-stone-900">UR GROZY Delivery Partner App</h2>
+            <p className="text-stone-500 text-xs sm:text-sm max-w-md mx-auto">
+              Connecting to Rider operations network. Click below to refresh your rider session.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              try {
+                localStorage.removeItem('gharsee_rider_logged_in');
+                localStorage.removeItem('gharsee_rider_profile');
+              } catch {}
+              window.location.href = '/rider';
+            }}
+            className="py-3 px-6 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs rounded-2xl shadow-lg transition-all flex items-center gap-2 mx-auto cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>RELOAD RIDER APP</span>
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function RiderLayoutInner() {
   const { 
     authUser,
     isLoggedIn, 
@@ -80,8 +127,7 @@ export default function RiderLayout() {
   // Strict Rider Verification Gate: Rider MUST be explicitly approved by Admin to enter dashboard
   const isApproved = Boolean(
     profile &&
-    (profile.is_approved === true || profile.isApproved === true) &&
-    (profile.status === 'active' || !profile.status) &&
+    (profile.is_approved === true || profile.isApproved === true || profile.status === 'approved' || profile.status === 'active') &&
     !profile.isPending &&
     profile.status !== 'pending_approval' &&
     profile.status !== 'pending' &&
@@ -132,5 +178,13 @@ export default function RiderLayout() {
       </div>
 
     </div>
+  );
+}
+
+export default function RiderLayout() {
+  return (
+    <RiderErrorBoundary>
+      <RiderLayoutInner />
+    </RiderErrorBoundary>
   );
 }

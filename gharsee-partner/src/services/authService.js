@@ -54,7 +54,11 @@ export async function signUpUserWithPhone({
   pincode,
   latitude,
   longitude,
-  imageUrl
+  imageUrl,
+  vehicleType = 'scooter',
+  vehicleNumber = '',
+  drivingLicense = '',
+  deliveryCity = 'Chikkamagaluru'
 }) {
   if (!isSupabaseConfigured) {
     return { user: null, session: null, error: 'Supabase is not configured' };
@@ -203,11 +207,10 @@ export async function signUpUserWithPhone({
       }
     } else if (role === 'rider') {
       try {
-        const riderCity = city || deliveryCity || 'Chikkamagaluru, Karnataka';
+        const riderCity = deliveryCity || city || 'Chikkamagaluru, Karnataka';
         const vType = (vehicleType || 'scooter').toLowerCase();
-        const vNum = (vehicleNumber || 'KA-14-EA-2024').trim().toUpperCase();
-        const dLic = (drivingLicense || 'KA1420240098765').trim().toUpperCase();
-        const cleanDigits = get10DigitPhone(normalizedPhone);
+        const vNum = (vehicleNumber || `KA-14-EA-${cleanDigits.slice(-4)}`).trim().toUpperCase();
+        const dLic = (drivingLicense || `KA14202400${cleanDigits.slice(-5)}`).trim().toUpperCase();
 
         const { data: allR } = await supabase.from('rider_profiles').select('id, phone');
         const existingR = (allR || []).find(r => get10DigitPhone(r.phone) === cleanDigits);
@@ -223,8 +226,9 @@ export async function signUpUserWithPhone({
               driving_license: dLic,
               delivery_city: riderCity,
               is_approved: false,
-              status: 'pending_approval',
-              is_online: false
+              status: 'pending',
+              is_online: false,
+              updated_at: new Date().toISOString()
             })
             .eq('id', existingR.id);
         } else {
@@ -239,8 +243,10 @@ export async function signUpUserWithPhone({
               driving_license: dLic,
               delivery_city: riderCity,
               is_approved: false,
-              status: 'pending_approval',
-              is_online: false
+              status: 'pending',
+              is_online: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
             }]);
         }
       } catch (riderErr) {
@@ -252,6 +258,10 @@ export async function signUpUserWithPhone({
       id: authUser.id,
       phone: normalizedPhone,
       role: role,
+      status: role === 'rider' ? 'pending' : undefined,
+      isPending: role === 'rider' ? true : undefined,
+      isApproved: role === 'rider' ? false : undefined,
+      is_approved: role === 'rider' ? false : undefined,
       user_metadata: { full_name: safeFullName, role: role, phone: normalizedPhone }
     };
 

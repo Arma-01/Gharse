@@ -6,7 +6,7 @@ import { updateStoreStatus, updateStoreInSupabase } from '../../services/storeSe
 import { validateStatusTransition } from '../services/shopkeeperService';
 import { get10DigitPhone } from '../../services/authService';
 
-const ShopkeeperContext = createContext();
+export const ShopkeeperContext = createContext();
 
 export const ShopkeeperProvider = ({ children }) => {
   const [authUser, setAuthUser] = useState(() => {
@@ -482,3 +482,5 @@ export const useShopkeeper = () => {
   if (!context) throw new Error('useShopkeeper must be used within a ShopkeeperProvider');
   return context;
 };
+
+export default ShopkeeperProvider;

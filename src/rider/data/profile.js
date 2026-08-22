@@ -12,9 +12,15 @@ export const INITIAL_RIDER_PROFILE = {
   city: 'Chikkamagaluru, Karnataka',
   deliveryCity: 'Chikkamagaluru, Karnataka',
   avatar: '/images/hero_grocery.jpg',
+  approval_status: 'pending',
+  approvalStatus: 'pending',
+  is_active: false,
+  isActive: false,
+  is_online: false,
+  isOnline: false,
+  rejectionReason: null,
   isPending: true,
   isApproved: false,
   is_approved: false,
-  status: 'pending_approval',
-  isOnline: false
+  status: 'pending'
 };

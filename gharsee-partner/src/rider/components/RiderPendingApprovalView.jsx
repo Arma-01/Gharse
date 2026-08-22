@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRider } from '../context/RiderContext';
 import { 
   Bike, Clock, AlertTriangle, RefreshCw, ShieldCheck, 
@@ -9,6 +9,17 @@ export default function RiderPendingApprovalView({ onLogout }) {
   const { profile, riderProfile, refreshRiderProfile, addRiderToast } = useRider();
   const [isChecking, setIsChecking] = useState(false);
   const currentRider = riderProfile || profile || {};
+
+  // Auto-poll approval status every 3 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (refreshRiderProfile) {
+        refreshRiderProfile().catch(() => {});
+      }
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [refreshRiderProfile]);
 
   const handleCheckStatus = async () => {
     setIsChecking(true);

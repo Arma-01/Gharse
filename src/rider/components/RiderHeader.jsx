@@ -6,7 +6,8 @@ export default function RiderHeader() {
   const { isOnline, toggleAvailability, profile, notifications, logoutRider } = useRider();
   const [showNotifications, setShowNotifications] = useState(false);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const notifList = Array.isArray(notifications) ? notifications : [];
+  const unreadCount = notifList.filter(n => n && !n.read).length;
 
   return (
     <header className="sticky top-0 z-30 bg-[#0E382B] text-white px-4 sm:px-6 py-3 shadow-md border-b border-emerald-900/60">
@@ -26,7 +27,7 @@ export default function RiderHeader() {
           <span className="bg-emerald-500/30 text-emerald-300 text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider hidden xs:inline-block">
             DELIVERY PARTNER
           </span>
-          <p className="text-[11px] text-emerald-200/80 font-medium hidden sm:block">⭐ {profile.rating}</p>
+          <p className="text-[11px] text-emerald-200/80 font-medium hidden sm:block">⭐ {profile?.rating || 5.0}</p>
         </div>
 
         {/* RIGHT: ONLINE/OFFLINE TOGGLE & NOTIFICATIONS & LOGOUT */}

@@ -11,7 +11,7 @@ import AdminStoreProductsModal from './AdminStoreProductsModal';
 import { CheckCircle2, AlertCircle, Info } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const { activeTab, toasts } = useAdmin();
+  const { activeTab, toasts, stats, setActiveTab } = useAdmin();
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-stone-900 flex flex-col font-sans selection:bg-emerald-200 selection:text-emerald-950">
@@ -23,7 +23,7 @@ export default function AdminDashboard() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
         
         {/* PENDING RIDER APPROVAL NOTIFICATION BANNER */}
-        {useAdmin().stats.pendingRidersCount > 0 && activeTab !== 'riders' && (
+        {stats?.pendingRidersCount > 0 && activeTab !== 'riders' && (
           <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-stone-950 p-4 sm:p-5 rounded-3xl shadow-md border border-amber-300 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <div className="w-11 h-11 rounded-2xl bg-stone-950 text-amber-400 flex items-center justify-center font-black shrink-0 shadow-sm text-lg">
@@ -31,7 +31,7 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <h4 className="font-display font-black text-sm text-stone-950 flex items-center gap-2">
-                  <span>Action Required: {useAdmin().stats.pendingRidersCount} Delivery Partner Application(s) Awaiting Review</span>
+                  <span>Action Required: {stats.pendingRidersCount} Delivery Partner Application(s) Awaiting Review</span>
                   <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping inline-block" />
                 </h4>
                 <p className="text-xs text-stone-800 font-semibold mt-0.5">
@@ -41,7 +41,7 @@ export default function AdminDashboard() {
             </div>
 
             <button
-              onClick={() => useAdmin().setActiveTab('riders')}
+              onClick={() => setActiveTab('riders')}
               className="w-full sm:w-auto py-2.5 px-5 bg-stone-950 hover:bg-stone-900 active:scale-95 text-amber-300 font-extrabold text-xs rounded-2xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0"
             >
               <span>Review Rider Applications →</span>

@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured, getSupabaseErrorMessage } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, getSupabaseErrorMessage } from '../lib/supabase.js';
 
 // Enable real authentication with Supabase Auth
 export const ENABLE_REAL_AUTH = true;
@@ -55,7 +55,11 @@ export async function signUpUserWithPhone({
   pincode,
   latitude,
   longitude,
-  imageUrl
+  imageUrl,
+  vehicleType = 'scooter',
+  vehicleNumber = '',
+  drivingLicense = '',
+  deliveryCity = 'Chikkamagaluru'
 }) {
   if (!isSupabaseConfigured) {
     return { user: null, session: null, error: 'Supabase is not configured' };
@@ -205,45 +209,77 @@ export async function signUpUserWithPhone({
       }
     } else if (role === 'rider') {
       try {
-        const riderCity = city || deliveryCity || 'Chikkamagaluru, Karnataka';
+        const riderCity = deliveryCity || city || 'Chikkamagaluru, Karnataka';
         const vType = (vehicleType || 'scooter').toLowerCase();
-        const vNum = (vehicleNumber || 'KA-14-EA-2024').trim().toUpperCase();
-        const dLic = (drivingLicense || 'KA1420240098765').trim().toUpperCase();
-        const cleanDigits = get10DigitPhone(normalizedPhone);
+        const vNum = (vehicleNumber || `KA-14-EA-${cleanDigits.slice(-4)}`).trim().toUpperCase();
+        const dLic = (drivingLicense || `KA14202400${cleanDigits.slice(-5)}`).trim().toUpperCase();
 
         const { data: allR } = await supabase.from('rider_profiles').select('id, phone');
         const existingR = (allR || []).find(r => get10DigitPhone(r.phone) === cleanDigits);
 
+        const riderDataPayload = {
+          user_id: authUser.id,
+          full_name: safeFullName,
+          vehicle_type: vType,
+          vehicle_number: vNum,
+          driving_license: dLic,
+          delivery_city: riderCity,
+          approval_status: 'pending',
+          is_active: false,
+          is_online: false,
+          is_approved: false,
+          status: 'pending',
+          updated_at: new Date().toISOString()
+        };
+
         if (existingR?.id) {
-          await supabase
+          const { error: updateErr } = await supabase
             .from('rider_profiles')
-            .update({
-              user_id: authUser.id,
-              full_name: safeFullName,
-              vehicle_type: vType,
-              vehicle_number: vNum,
-              driving_license: dLic,
-              delivery_city: riderCity,
-              is_approved: false,
-              status: 'pending_approval',
-              is_online: false
-            })
+            .update(riderDataPayload)
             .eq('id', existingR.id);
+
+          if (updateErr) {
+            // Fallback for base columns if new columns not yet migrated
+            await supabase
+              .from('rider_profiles')
+              .update({
+                user_id: authUser.id,
+                full_name: safeFullName,
+                vehicle_type: vType,
+                vehicle_number: vNum,
+                driving_license: dLic,
+                delivery_city: riderCity,
+                is_online: false
+              })
+              .eq('id', existingR.id)
+              .catch?.(() => {});
+          }
         } else {
-          await supabase
+          const { error: insertErr } = await supabase
             .from('rider_profiles')
             .insert([{
-              user_id: authUser.id,
-              full_name: safeFullName,
+              ...riderDataPayload,
               phone: normalizedPhone,
-              vehicle_type: vType,
-              vehicle_number: vNum,
-              driving_license: dLic,
-              delivery_city: riderCity,
-              is_approved: false,
-              status: 'pending_approval',
-              is_online: false
+              created_at: new Date().toISOString()
             }]);
+
+          if (insertErr) {
+            // Fallback for base columns if new columns not yet migrated
+            await supabase
+              .from('rider_profiles')
+              .insert([{
+                user_id: authUser.id,
+                full_name: safeFullName,
+                phone: normalizedPhone,
+                vehicle_type: vType,
+                vehicle_number: vNum,
+                driving_license: dLic,
+                delivery_city: riderCity,
+                is_online: false,
+                created_at: new Date().toISOString()
+              }])
+              .catch?.(() => {});
+          }
         }
       } catch (riderErr) {
         console.warn('Rider creation warning in signUpUserWithPhone:', riderErr);
@@ -254,6 +290,16 @@ export async function signUpUserWithPhone({
       id: authUser.id,
       phone: normalizedPhone,
       role: role,
+      approval_status: role === 'rider' ? 'pending' : undefined,
+      approvalStatus: role === 'rider' ? 'pending' : undefined,
+      is_active: role === 'rider' ? false : undefined,
+      isActive: role === 'rider' ? false : undefined,
+      is_online: false,
+      isOnline: false,
+      status: role === 'rider' ? 'pending' : undefined,
+      isPending: role === 'rider' ? true : undefined,
+      isApproved: role === 'rider' ? false : undefined,
+      is_approved: role === 'rider' ? false : undefined,
       user_metadata: { full_name: safeFullName, role: role, phone: normalizedPhone }
     };
 

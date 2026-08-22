@@ -54,7 +54,11 @@ export async function signUpUserWithPhone({
   pincode = '',
   latitude = null,
   longitude = null,
-  imageUrl = null
+  imageUrl = null,
+  vehicleType = 'scooter',
+  vehicleNumber = '',
+  drivingLicense = '',
+  deliveryCity = ''
 }) {
   if (!isSupabaseConfigured) {
     return { user: null, session: null, error: 'Supabase is not configured' };
@@ -193,7 +197,7 @@ export async function signUpUserWithPhone({
             pincode: pincode || '577101',
             latitude: latitude != null ? parseFloat(latitude) : 13.3284,
             longitude: longitude != null ? parseFloat(longitude) : 75.7578,
-            status: 'pending_approval',
+            status: 'pending',
             is_approved: false,
             is_open: false,
             image_url: imageUrl || '/images/store_lakshmi.jpg'
@@ -203,11 +207,10 @@ export async function signUpUserWithPhone({
       }
     } else if (role === 'rider') {
       try {
-        const riderCity = city || deliveryCity || 'Chikkamagaluru, Karnataka';
+        const riderCity = deliveryCity || city || 'Chikkamagaluru, Karnataka';
         const vType = (vehicleType || 'scooter').toLowerCase();
-        const vNum = (vehicleNumber || 'KA-14-EA-2024').trim().toUpperCase();
-        const dLic = (drivingLicense || 'KA1420240098765').trim().toUpperCase();
-        const cleanDigits = get10DigitPhone(normalizedPhone);
+        const vNum = (vehicleNumber || `KA-14-EA-${cleanDigits.slice(-4)}`).trim().toUpperCase();
+        const dLic = (drivingLicense || `KA14202400${cleanDigits.slice(-5)}`).trim().toUpperCase();
 
         const { data: allR } = await supabase.from('rider_profiles').select('id, phone');
         const existingR = (allR || []).find(r => get10DigitPhone(r.phone) === cleanDigits);
@@ -223,7 +226,7 @@ export async function signUpUserWithPhone({
               driving_license: dLic,
               delivery_city: riderCity,
               is_approved: false,
-              status: 'pending_approval',
+              status: 'pending',
               is_online: false
             })
             .eq('id', existingR.id);
@@ -239,7 +242,7 @@ export async function signUpUserWithPhone({
               driving_license: dLic,
               delivery_city: riderCity,
               is_approved: false,
-              status: 'pending_approval',
+              status: 'pending',
               is_online: false
             }]);
         }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { get10DigitPhone } from '../../services/authService';
 import { 
   fetchAllAdminShops, 
   approveShopInSupabase, 
@@ -9,6 +10,8 @@ import {
   fetchAllAdminRiders, 
   approveRiderInSupabase, 
   rejectRiderInSupabase,
+  suspendRiderInSupabase,
+  reactivateRiderInSupabase,
   fetchAllAdminCustomers,
   fetchAllAdminOrders,
   updateAdminOrderStatus,
@@ -178,13 +181,27 @@ export function AdminProvider({ children }) {
         .subscribe();
     }
 
-    // 2. Cross-tab & In-app registration event listeners
+    // 2. BroadcastChannel for instant cross-tab / cross-window sync
+    let riderBus = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        riderBus = new BroadcastChannel('gharsee_admin_rider_bus');
+        riderBus.onmessage = (event) => {
+          if (event.data?.type === 'RIDER_REGISTERED' || event.data?.type === 'RIDER_STATUS_UPDATE') {
+            refreshData();
+          }
+        };
+      }
+    } catch {}
+
+    // 3. Cross-tab & In-app registration event listeners
     const handleStorage = (e) => {
       if (
         e.key === 'gharsee_latest_rider_registration' ||
         e.key === 'gharsee_rider_status_update' ||
         e.key === 'gharsee_store_status_update' ||
-        e.key === 'gharsee_store_registered'
+        e.key === 'gharsee_store_registered' ||
+        e.key === 'gharsee_local_riders'
       ) {
         refreshData();
       }
@@ -200,13 +217,14 @@ export function AdminProvider({ children }) {
     window.addEventListener('gharsee_store_status_changed', handleCustomEvent);
     window.addEventListener('gharsee_rider_status_changed', handleCustomEvent);
 
-    // 3. Heartbeat polling (every 4 seconds)
+    // 4. Heartbeat polling (every 4 seconds)
     const interval = setInterval(() => {
       refreshData();
     }, 4000);
 
     return () => {
       if (channel) supabase.removeChannel(channel);
+      if (riderBus) riderBus.close();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('gharsee_rider_registered', handleCustomEvent);
       window.removeEventListener('gharsee_store_registered', handleCustomEvent);
@@ -292,52 +310,142 @@ export function AdminProvider({ children }) {
   // Actions: Approve Rider
   const approveRider = async (riderId, riderName = 'Rider', extraData = {}) => {
     const targetRider = riders.find(r => r.id === riderId || r.userId === riderId) || extraData;
+    const cleanPhone = get10DigitPhone(targetRider?.phone || extraData?.phone);
+
+    // Optimistic UI update
+    setRiders(prev => prev.map(r => {
+      const match = r.id === riderId || r.userId === riderId || (cleanPhone && get10DigitPhone(r.phone) === cleanPhone);
+      return match ? { 
+        ...r, 
+        isPending: false, 
+        isApproved: true, 
+        is_approved: true, 
+        isActive: true,
+        is_active: true,
+        status: 'approved',
+        approvalStatus: 'approved',
+        approval_status: 'approved',
+        rejectionReason: null,
+        rejection_reason: null
+      } : r;
+    }));
+
     const success = await approveRiderInSupabase(riderId, { ...targetRider, ...extraData });
     if (success) {
-      setRiders(prev => prev.map(r => (r.id === riderId || r.userId === riderId || (targetRider.phone && r.phone === targetRider.phone)) ? { ...r, isPending: false, isApproved: true, status: 'active', isOnline: true } : r));
-      try {
-        localStorage.setItem('gharsee_rider_status_update', JSON.stringify({
-          riderId,
-          isApproved: true,
-          status: 'active',
-          timestamp: Date.now()
-        }));
-        window.dispatchEvent(new CustomEvent('gharsee_rider_status_changed', {
-          detail: { riderId, isApproved: true, status: 'active' }
-        }));
-      } catch {}
       addAdminToast(`🎉 Delivery Partner "${riderName}" approved & verified!`, 'success');
       try {
         confetti({ particleCount: 70, spread: 70, origin: { y: 0.7 } });
       } catch {}
       await refreshData();
     } else {
+      await refreshData();
       addAdminToast(`Failed to approve rider "${riderName}".`, 'error');
     }
     return success;
   };
 
   // Actions: Reject Rider
-  const rejectRider = async (riderId, riderName = 'Rider', extraData = {}) => {
-    const targetRider = riders.find(r => r.id === riderId || r.userId === riderId) || extraData;
-    const success = await rejectRiderInSupabase(riderId, { ...targetRider, ...extraData });
+  const rejectRider = async (riderId, riderName = 'Rider', reasonOrData = 'Application rejected by Admin', extraData = {}) => {
+    let reason = 'Application rejected by Admin';
+    let data = {};
+
+    if (typeof reasonOrData === 'string') {
+      reason = reasonOrData;
+      data = extraData || {};
+    } else if (reasonOrData && typeof reasonOrData === 'object') {
+      data = reasonOrData;
+      reason = data.rejectionReason || data.reason || 'Application rejected by Admin';
+    }
+
+    const targetRider = riders.find(r => r.id === riderId || r.userId === riderId) || data;
+    const cleanPhone = get10DigitPhone(targetRider?.phone || data?.phone);
+
+    // Optimistic UI update
+    setRiders(prev => prev.map(r => {
+      const match = r.id === riderId || r.userId === riderId || (cleanPhone && get10DigitPhone(r.phone) === cleanPhone);
+      return match ? { 
+        ...r, 
+        isPending: false, 
+        isApproved: false, 
+        is_approved: false, 
+        isActive: false,
+        is_active: false,
+        status: 'rejected',
+        approvalStatus: 'rejected',
+        approval_status: 'rejected',
+        rejectionReason: reason,
+        rejection_reason: reason,
+        isOnline: false,
+        is_online: false
+      } : r;
+    }));
+
+    const success = await rejectRiderInSupabase(riderId, reason, { ...targetRider, ...data });
     if (success) {
-      setRiders(prev => prev.map(r => (r.id === riderId || r.userId === riderId || (targetRider.phone && r.phone === targetRider.phone)) ? { ...r, isPending: false, isApproved: false, status: 'rejected', isOnline: false } : r));
-      try {
-        localStorage.setItem('gharsee_rider_status_update', JSON.stringify({
-          riderId,
-          isApproved: false,
-          status: 'rejected',
-          timestamp: Date.now()
-        }));
-        window.dispatchEvent(new CustomEvent('gharsee_rider_status_changed', {
-          detail: { riderId, isApproved: false, status: 'rejected' }
-        }));
-      } catch {}
       addAdminToast(`Rider application for "${riderName}" rejected.`, 'info');
       await refreshData();
     } else {
+      await refreshData();
       addAdminToast(`Failed to reject rider "${riderName}".`, 'error');
+    }
+    return success;
+  };
+
+  // Actions: Suspend Rider
+  const suspendRider = async (riderId, riderName = 'Rider', reasonOrData = 'Account temporarily suspended by Admin', extraData = {}) => {
+    let reason = 'Account temporarily suspended by Admin';
+    let data = {};
+
+    if (typeof reasonOrData === 'string') {
+      reason = reasonOrData;
+      data = extraData || {};
+    } else if (reasonOrData && typeof reasonOrData === 'object') {
+      data = reasonOrData;
+      reason = data.rejectionReason || data.reason || 'Account temporarily suspended by Admin';
+    }
+
+    const targetRider = riders.find(r => r.id === riderId || r.userId === riderId) || data;
+    const cleanPhone = get10DigitPhone(targetRider?.phone || data?.phone);
+
+    setRiders(prev => prev.map(r => {
+      const match = r.id === riderId || r.userId === riderId || (cleanPhone && get10DigitPhone(r.phone) === cleanPhone);
+      return match ? { 
+        ...r, 
+        isPending: false, 
+        isApproved: false, 
+        is_approved: false, 
+        isActive: false,
+        is_active: false,
+        status: 'suspended',
+        approvalStatus: 'suspended',
+        approval_status: 'suspended',
+        rejectionReason: reason,
+        rejection_reason: reason,
+        isOnline: false,
+        is_online: false
+      } : r;
+    }));
+
+    const success = await suspendRiderInSupabase(riderId, reason, { ...targetRider, ...data });
+    if (success) {
+      addAdminToast(`Rider "${riderName}" has been suspended.`, 'info');
+      await refreshData();
+    } else {
+      await refreshData();
+      addAdminToast(`Failed to suspend rider "${riderName}".`, 'error');
+    }
+    return success;
+  };
+
+  // Actions: Reactivate Rider
+  const reactivateRider = async (riderId, riderName = 'Rider', extraData = {}) => {
+    const targetRider = riders.find(r => r.id === riderId || r.userId === riderId) || extraData;
+    const success = await reactivateRiderInSupabase(riderId, { ...targetRider, ...extraData });
+    if (success) {
+      addAdminToast(`Rider "${riderName}" reactivated & restored to active fleet!`, 'success');
+      await refreshData();
+    } else {
+      addAdminToast(`Failed to reactivate rider "${riderName}".`, 'error');
     }
     return success;
   };
@@ -446,8 +554,10 @@ export function AdminProvider({ children }) {
   // Computed Aggregated Metrics
   const pendingShopsCount = shops.filter(s => s.isPending).length;
   const approvedShopsCount = shops.filter(s => s.isApproved).length;
-  const pendingRidersCount = riders.filter(r => r.isPending).length;
-  const activeRidersCount = riders.filter(r => r.isApproved).length;
+  const pendingRidersCount = riders.filter(r => (r.approvalStatus === 'pending' || r.isPending)).length;
+  const activeRidersCount = riders.filter(r => (r.approvalStatus === 'approved' || r.isApproved) && r.isActive !== false).length;
+  const rejectedRidersCount = riders.filter(r => r.approvalStatus === 'rejected').length;
+  const suspendedRidersCount = riders.filter(r => r.approvalStatus === 'suspended').length;
   const totalCustomersCount = customers.length;
   const totalOrdersCount = orders.length;
   const totalGmvRevenue = orders.filter(o => o.status !== 'rejected' && o.status !== 'cancelled').reduce((sum, o) => sum + (o.totalAmount || 0), 0);
@@ -473,6 +583,8 @@ export function AdminProvider({ children }) {
     toggleShop,
     approveRider,
     rejectRider,
+    suspendRider,
+    reactivateRider,
     updateOrderStatus,
     addAdminToast,
     // Store Inventory Management
@@ -494,6 +606,8 @@ export function AdminProvider({ children }) {
       totalShopsCount: shops.length,
       pendingRidersCount,
       activeRidersCount,
+      rejectedRidersCount,
+      suspendedRidersCount,
       totalRidersCount: riders.length,
       totalCustomersCount,
       totalOrdersCount,

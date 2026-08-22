@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { 
   fetchRiderDeliveries, 
@@ -7,7 +7,11 @@ import {
   claimRiderOrderInSupabase 
 } from '../../services/orderService';
 import { get10DigitPhone } from '../../services/authService';
-import { updateRiderOnlineStatusInSupabase } from '../../services/riderService';
+import { 
+  updateRiderOnlineStatusInSupabase, 
+  fetchRiderProfileFromSupabase, 
+  normalizeRiderProfile 
+} from '../../services/riderService';
 import { 
   subscribeToRiderNotifications, 
   fetchPendingRiderNotification, 
@@ -22,20 +26,29 @@ import { INITIAL_RIDER_EARNINGS } from '../data/earnings';
 import { INITIAL_RIDER_PROFILE } from '../data/profile';
 import { INITIAL_RIDER_NOTIFICATIONS } from '../data/notifications';
 
-const RiderContext = createContext();
+export const RiderContext = createContext();
 
 export const RiderProvider = ({ children }) => {
-  const [authUser, setAuthUser] = useState(null);
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('gharsee_rider_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     try {
-      return localStorage.getItem('gharsee_rider_logged_in') === 'true';
+      const savedUser = localStorage.getItem('gharsee_rider_user');
+      return Boolean(savedUser && localStorage.getItem('gharsee_rider_logged_in') === 'true');
     } catch {
       return false;
     }
   });
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-  const [isOnline, setIsOnline] = useState(true);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isOnline, setIsOnline] = useState(false);
   const [incomingRequest, setIncomingRequest] = useState(null);
   const [incomingNotification, setIncomingNotification] = useState(null);
   const [activeDelivery, setActiveDelivery] = useState(null);
@@ -64,6 +77,18 @@ export const RiderProvider = ({ children }) => {
   const [notifications, setNotifications] = useState(INITIAL_RIDER_NOTIFICATIONS);
   const [activeRiderTab, setActiveRiderTab] = useState('dashboard');
   const [toasts, setToasts] = useState([]);
+
+  const addRiderToast = useCallback((message, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3500);
+  }, []);
+
+  const removeRiderToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
   // Derive live earnings from real completed deliveries in Supabase
   const calculateLiveEarningsFromHistory = (historyList) => {
@@ -98,74 +123,24 @@ export const RiderProvider = ({ children }) => {
     };
   };
 
-  // Load Rider Profile from Supabase rider_profiles table by user_id or 10-digit phone number
+  // Load Authoritative Rider Profile directly from Supabase
   const loadRiderProfileFromSupabase = async (userId, userPhone) => {
-    if (!isSupabaseConfigured) return;
-
-    try {
-      const cleanDigits = get10DigitPhone(userPhone);
-      const { data: allRiders, error } = await supabase.from('rider_profiles').select('*');
-
-      let matched = null;
-      if (!error && allRiders && allRiders.length > 0) {
-        matched = allRiders.find(r => 
-          (userId && r.user_id === userId) || 
-          (cleanDigits && get10DigitPhone(r.phone) === cleanDigits)
-        );
-      }
-
-      if (matched) {
-        // Auto-link user_id to current authenticated user if not linked yet
-        if (userId && (!matched.user_id || matched.user_id !== userId)) {
-          supabase
-            .from('rider_profiles')
-            .update({ user_id: userId })
-            .eq('id', matched.id)
-            .catch?.(() => {});
-        }
-
-        const statusLower = (matched.status || '').toLowerCase();
-        const isPending = statusLower === 'pending_approval' || statusLower === 'pending' || matched.is_approved === false;
-        const isApproved = !isPending && statusLower !== 'rejected' && matched.is_approved !== false;
-
-        const liveProfile = {
-          id: matched.id,
-          user_id: matched.user_id || userId,
-          fullName: matched.full_name || matched.name || 'Delivery Partner',
-          name: matched.full_name || matched.name || 'Delivery Partner',
-          phone: matched.phone || userPhone,
-          email: matched.email || `${cleanDigits}@urgrozy.app`,
-          rating: matched.rating || 5.0,
-          totalDeliveries: matched.total_deliveries || 0,
-          memberSince: matched.created_at ? new Date(matched.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : 'Recently Joined',
-          vehicleType: matched.vehicle_type || matched.vehicleType || 'Scooter',
-          vehicleNumber: matched.vehicle_number || matched.vehicleNumber || 'Not specified',
-          drivingLicense: matched.driving_license || matched.drivingLicense || 'Not specified',
-          city: matched.delivery_city || matched.city || 'Chikkamagaluru, Karnataka',
-          deliveryCity: matched.delivery_city || matched.city || 'Chikkamagaluru, Karnataka',
-          avatar: '/images/hero_grocery.jpg',
-          status: matched.status || (isPending ? 'pending_approval' : 'active'),
-          isApproved: isApproved,
-          isPending: isPending,
-          is_approved: matched.is_approved,
-          isOnline: isApproved ? (matched.is_online !== false) : false
-        };
-
-        setProfile(liveProfile);
-        setIsOnline(liveProfile.isOnline);
-        try {
-          localStorage.setItem('gharsee_rider_profile', JSON.stringify(liveProfile));
-        } catch {}
-      }
-    } catch (err) {
-      console.error('Error fetching rider_profiles from Supabase:', err);
+    const liveProfile = await fetchRiderProfileFromSupabase(userId, userPhone);
+    if (liveProfile) {
+      setProfile(liveProfile);
+      setIsOnline(liveProfile.isOnline);
+      try {
+        localStorage.setItem('gharsee_rider_profile', JSON.stringify(liveProfile));
+      } catch {}
+      return liveProfile;
     }
+    return null;
   };
 
   const refreshRiderProfile = async () => {
     const userId = authUser?.id;
     const userPhone = authUser?.phone || authUser?.user_metadata?.phone || profile?.phone;
-    await loadRiderProfileFromSupabase(userId, userPhone);
+    return await loadRiderProfileFromSupabase(userId, userPhone);
   };
 
   // Check Supabase Authentication session for Rider
@@ -173,31 +148,41 @@ export const RiderProvider = ({ children }) => {
     async function checkRiderAuth() {
       setIsCheckingAuth(true);
 
-      if (!isSupabaseConfigured) {
-        setIsCheckingAuth(false);
-        return;
+      const savedLoggedIn = localStorage.getItem('gharsee_rider_logged_in') === 'true';
+      const savedUser = JSON.parse(localStorage.getItem('gharsee_rider_user') || 'null');
+      const savedProfile = JSON.parse(localStorage.getItem('gharsee_rider_profile') || 'null');
+
+      if (savedLoggedIn && savedUser) {
+        setAuthUser(savedUser);
+        setIsLoggedIn(true);
+        if (savedProfile) {
+          setProfile(savedProfile);
+          setIsOnline(savedProfile.isOnline || false);
+        }
       }
 
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const userPhone = user.phone || user.user_metadata?.phone;
-          setAuthUser(user);
-          setIsLoggedIn(true);
-          try { localStorage.setItem('gharsee_rider_logged_in', 'true'); } catch {}
-          await loadRiderProfileFromSupabase(user.id, userPhone);
-        } else {
-          setAuthUser(null);
-          setIsLoggedIn(false);
-          setProfile(INITIAL_RIDER_PROFILE);
-          try {
-            localStorage.removeItem('gharsee_rider_logged_in');
-            localStorage.removeItem('gharsee_rider_profile');
-            localStorage.removeItem('gharsee_rider_earnings');
-          } catch {}
+        if (isSupabaseConfigured) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            setAuthUser(session.user);
+            setIsLoggedIn(true);
+            try {
+              localStorage.setItem('gharsee_rider_logged_in', 'true');
+              localStorage.setItem('gharsee_rider_user', JSON.stringify(session.user));
+            } catch {}
+            await loadRiderProfileFromSupabase(session.user.id, session.user.phone || session.user.user_metadata?.phone);
+          } else if (!savedLoggedIn) {
+            setIsLoggedIn(false);
+          }
         }
       } catch (err) {
-        console.error('Error checking rider auth:', err);
+        console.warn('Rider auth check non-fatal warning:', err);
+        if (savedUser) {
+          setAuthUser(savedUser);
+          setIsLoggedIn(true);
+          if (savedProfile) setProfile(savedProfile);
+        }
       } finally {
         setIsCheckingAuth(false);
       }
@@ -210,7 +195,10 @@ export const RiderProvider = ({ children }) => {
         if (session?.user) {
           setAuthUser(session.user);
           setIsLoggedIn(true);
-          try { localStorage.setItem('gharsee_rider_logged_in', 'true'); } catch {}
+          try { 
+            localStorage.setItem('gharsee_rider_logged_in', 'true');
+            localStorage.setItem('gharsee_rider_user', JSON.stringify(session.user));
+          } catch {}
           await loadRiderProfileFromSupabase(session.user.id, session.user.phone || session.user.user_metadata?.phone);
         } else if (event === 'SIGNED_OUT') {
           setAuthUser(null);
@@ -219,6 +207,7 @@ export const RiderProvider = ({ children }) => {
           setEarnings(INITIAL_RIDER_EARNINGS);
           try {
             localStorage.removeItem('gharsee_rider_logged_in');
+            localStorage.removeItem('gharsee_rider_user');
             localStorage.removeItem('gharsee_rider_profile');
             localStorage.removeItem('gharsee_rider_earnings');
           } catch {}
@@ -231,60 +220,103 @@ export const RiderProvider = ({ children }) => {
     }
   }, []);
 
-  // Listen for external rider status change events (from Admin actions)
+  // Listen for external rider status change events (from Admin actions & BroadcastChannel)
   useEffect(() => {
+    let riderBus = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        riderBus = new BroadcastChannel('gharsee_admin_rider_bus');
+        riderBus.onmessage = (event) => {
+          if (event.data?.type === 'RIDER_STATUS_UPDATE') {
+            const data = event.data;
+            const myPhone = get10DigitPhone(profile?.phone || authUser?.phone || authUser?.user_metadata?.phone);
+            const targetPhone = get10DigitPhone(data.phone);
+
+            if (
+              data.riderId === profile?.id ||
+              data.riderId === authUser?.id ||
+              (data.userId && (data.userId === profile?.user_id || data.userId === authUser?.id)) ||
+              (myPhone && targetPhone && myPhone === targetPhone)
+            ) {
+              if (data.isApproved) {
+                setProfile(prev => ({
+                  ...prev,
+                  isApproved: true,
+                  isPending: false,
+                  status: data.status || 'approved',
+                  is_approved: true
+                }));
+                addRiderToast('🎉 Your Rider account has been approved by Admin! Welcome to UR GROZY Delivery Partner!', 'success');
+              } else if (data.status === 'rejected') {
+                setProfile(prev => ({
+                  ...prev,
+                  isApproved: false,
+                  isPending: false,
+                  status: 'rejected',
+                  is_approved: false,
+                  isOnline: false
+                }));
+                setIsOnline(false);
+              }
+              refreshRiderProfile();
+            }
+          }
+        };
+      }
+    } catch {}
+
     const handleStatusChange = () => {
       refreshRiderProfile();
     };
+
     window.addEventListener('gharsee_rider_status_changed', handleStatusChange);
     window.addEventListener('storage', handleStatusChange);
+
     return () => {
+      if (riderBus) riderBus.close();
       window.removeEventListener('gharsee_rider_status_changed', handleStatusChange);
       window.removeEventListener('storage', handleStatusChange);
     };
-  }, [authUser, profile?.id]);
+  }, [authUser, profile?.id, profile?.phone, addRiderToast]);
 
   // Realtime Supabase listener on rider_profiles table for instant unlock when admin approves
   useEffect(() => {
-    if (!isSupabaseConfigured || !profile?.id) return;
+    if (!isSupabaseConfigured) return;
 
+    const channelName = 'public:rider_profiles:realtime_sync';
     const profileChannel = supabase
-      .channel(`public:rider_profiles:${profile.id}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
-          table: 'rider_profiles',
-          filter: `id=eq.${profile.id}`
+          table: 'rider_profiles'
         },
         (payload) => {
           if (payload.new) {
-            const newStatus = (payload.new.status || '').toLowerCase();
-            const newIsPending = newStatus === 'pending_approval' || newStatus === 'pending' || payload.new.is_approved === false;
-            const newIsApproved = !newIsPending && newStatus !== 'rejected' && payload.new.is_approved !== false;
-            
-            setProfile(prev => {
-              const updated = {
-                ...prev,
-                ...payload.new,
-                fullName: payload.new.full_name || prev?.fullName,
-                vehicleType: payload.new.vehicle_type || prev?.vehicleType,
-                vehicleNumber: payload.new.vehicle_number || prev?.vehicleNumber,
-                drivingLicense: payload.new.driving_license || prev?.drivingLicense,
-                deliveryCity: payload.new.delivery_city || prev?.deliveryCity,
-                status: payload.new.status,
-                is_approved: payload.new.is_approved,
-                isPending: newIsPending,
-                isApproved: newIsApproved,
-                isOnline: newIsApproved ? Boolean(payload.new.is_online) : false
-              };
-              try { localStorage.setItem('gharsee_rider_profile', JSON.stringify(updated)); } catch {}
-              return updated;
-            });
+            const cleanPhone = get10DigitPhone(profile?.phone || authUser?.phone || authUser?.user_metadata?.phone);
+            const isMatch = 
+              (profile?.id && (payload.new.id === profile.id || payload.new.user_id === profile.id)) ||
+              (authUser?.id && (payload.new.user_id === authUser.id || payload.new.id === authUser.id)) ||
+              (cleanPhone && get10DigitPhone(payload.new.phone) === cleanPhone);
 
-            if (newIsApproved) {
-              addRiderToast('🎉 Your Rider account has been approved by Admin! Welcome to UR GROZY Delivery Partner!', 'success');
+            if (isMatch) {
+              const updated = normalizeRiderProfile(payload.new, authUser?.id, profile?.phone);
+              const wasApproved = profile?.approvalStatus === 'approved' || profile?.isApproved;
+              const isNowApproved = updated.approvalStatus === 'approved' && updated.isActive;
+
+              setProfile(updated);
+              setIsOnline(updated.isOnline);
+              try { localStorage.setItem('gharsee_rider_profile', JSON.stringify(updated)); } catch {}
+
+              if (isNowApproved && !wasApproved) {
+                addRiderToast('🎉 Your Rider account has been approved by Admin! Welcome to UR GROZY Delivery Partner!', 'success');
+              } else if (updated.approvalStatus === 'rejected' && wasApproved) {
+                addRiderToast('⚠️ Your Rider account verification was revoked by Admin.', 'error');
+              } else if (updated.approvalStatus === 'suspended' && wasApproved) {
+                addRiderToast('⚠️ Your Rider account has been suspended by Admin.', 'error');
+              }
             }
           }
         }
@@ -294,7 +326,7 @@ export const RiderProvider = ({ children }) => {
     return () => {
       supabase.removeChannel(profileChannel);
     };
-  }, [profile?.id]);
+  }, [profile?.id, profile?.phone, profile?.approvalStatus, profile?.isApproved, authUser?.id, authUser?.phone, addRiderToast]);
 
   // Load live delivery tasks & calculate real earnings from Supabase (Strictly filtered by rider_id)
   useEffect(() => {
@@ -443,20 +475,15 @@ export const RiderProvider = ({ children }) => {
     };
   }, [isLoggedIn, isOnline, profile?.id, !!activeDelivery]);
 
-  const addRiderToast = (message, type = 'success') => {
-    const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3500);
-  };
-
-  const removeRiderToast = id => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
 
   // Toggle Rider Availability (UPDATES is_online COLUMN IN SUPABASE rider_profiles TABLE!)
   const toggleAvailability = async () => {
+    const isApprovedAndActive = (profile?.approvalStatus === 'approved' || profile?.isApproved) && profile?.isActive !== false;
+    if (!isApprovedAndActive) {
+      addRiderToast('⚠️ Only approved and active delivery partners can go online.', 'error');
+      return;
+    }
+
     const nextState = !isOnline;
     setIsOnline(nextState);
 
@@ -472,7 +499,7 @@ export const RiderProvider = ({ children }) => {
 
     const riderPhone = profile?.phone || authUser?.phone || authUser?.user_metadata?.phone;
     if (riderPhone) {
-      await updateRiderOnlineStatusInSupabase(riderPhone, nextState);
+      await updateRiderOnlineStatusInSupabase(riderPhone, nextState, authUser?.id || profile?.id);
     }
   };
 
@@ -633,46 +660,19 @@ export const RiderProvider = ({ children }) => {
   };
 
   const loginRider = async (userObj) => {
-    const isPending = Boolean(userObj?.isPending || userObj?.status === 'pending_approval' || userObj?.status === 'pending' || userObj?.is_approved === false || userObj?.isApproved === false);
-    const isApproved = !isPending;
-
-    const riderPhone = userObj?.phone || userObj?.user_metadata?.phone;
-    const liveProfile = {
-      id: userObj.id,
-      user_id: userObj.id || userObj.user_id,
-      name: userObj.full_name || userObj.user_metadata?.full_name || userObj.name || 'Delivery Partner',
-      fullName: userObj.full_name || userObj.user_metadata?.full_name || userObj.name || 'Delivery Partner',
-      phone: riderPhone || '+91 81238 21300',
-      email: `${get10DigitPhone(riderPhone || '8123821300')}@urgrozy.app`,
-      rating: userObj.rating || 5.0,
-      totalDeliveries: userObj.total_deliveries || 0,
-      memberSince: 'Recently Joined',
-      vehicleType: userObj.vehicle_type || userObj.vehicleType || 'Scooter',
-      vehicleNumber: userObj.vehicle_number || userObj.vehicleNumber || 'Not specified',
-      drivingLicense: userObj.driving_license || userObj.drivingLicense || 'Not specified',
-      city: userObj.delivery_city || userObj.city || 'Chikkamagaluru, Karnataka',
-      deliveryCity: userObj.delivery_city || userObj.city || 'Chikkamagaluru, Karnataka',
-      avatar: '/images/hero_grocery.jpg',
-      status: userObj.status || (isPending ? 'pending_approval' : 'active'),
-      isPending: isPending,
-      isApproved: isApproved,
-      is_approved: userObj.is_approved !== undefined ? userObj.is_approved : isApproved,
-      isOnline: isApproved ? Boolean(userObj.is_online || userObj.isOnline) : false
-    };
-
+    const liveProfile = normalizeRiderProfile(userObj, userObj?.id || userObj?.user_id, userObj?.phone);
     setAuthUser(userObj);
     setIsLoggedIn(true);
     setProfile(liveProfile);
     setIsOnline(liveProfile.isOnline);
     try {
       localStorage.setItem('gharsee_rider_logged_in', 'true');
+      localStorage.setItem('gharsee_rider_user', JSON.stringify(userObj));
       localStorage.setItem('gharsee_rider_profile', JSON.stringify(liveProfile));
     } catch {}
 
-    if (riderPhone) {
-      if (isApproved) {
-        await updateRiderOnlineStatusInSupabase(riderPhone, true, userObj.id);
-      }
+    const riderPhone = userObj?.phone || userObj?.user_metadata?.phone;
+    if (riderPhone || userObj?.id) {
       await loadRiderProfileFromSupabase(userObj.id, riderPhone);
     }
   };
@@ -680,11 +680,11 @@ export const RiderProvider = ({ children }) => {
   const logoutRider = async () => {
     const riderPhone = profile?.phone || authUser?.phone || authUser?.user_metadata?.phone;
     if (riderPhone) {
-      await updateRiderOnlineStatusInSupabase(riderPhone, false);
+      await updateRiderOnlineStatusInSupabase(riderPhone, false, authUser?.id || profile?.id);
     }
 
     if (isSupabaseConfigured) {
-      await supabase.auth.signOut();
+      try { await supabase.auth.signOut(); } catch {}
     }
     setAuthUser(null);
     setIsLoggedIn(false);
@@ -695,6 +695,7 @@ export const RiderProvider = ({ children }) => {
     setEarnings(INITIAL_RIDER_EARNINGS);
     try {
       localStorage.removeItem('gharsee_rider_logged_in');
+      localStorage.removeItem('gharsee_rider_user');
       localStorage.removeItem('gharsee_rider_profile');
       localStorage.removeItem('gharsee_rider_earnings');
     } catch {}
@@ -709,6 +710,10 @@ export const RiderProvider = ({ children }) => {
         isLoggedIn,
         isCheckingAuth,
         isOnline,
+        approvalStatus: profile?.approvalStatus || 'pending',
+        isActive: Boolean(profile?.isActive),
+        isApproved: Boolean(profile?.isApproved),
+        rejectionReason: profile?.rejectionReason,
         activeDelivery,
         incomingRequest,
         incomingNotification,
@@ -746,3 +751,7 @@ export const useRider = () => {
   if (!context) throw new Error('useRider must be used within a RiderProvider');
   return context;
 };
+
+export const userRider = useRider;
+
+export default RiderProvider;

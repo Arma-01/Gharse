@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 
 // Standard Grocery Categories across UR GROZY
 export const GLOBAL_CATEGORIES = [
